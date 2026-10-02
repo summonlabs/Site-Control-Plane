@@ -335,16 +335,23 @@ std::intptr_t File::native_handle() const noexcept {
   if (handle_ == nullptr) {
     return -1;
   }
-  const int descriptor = _fileno(handle_);
-  if (descriptor < 0) {
-    return -1;
-  }
 #if defined(_WIN32)
   // The writer lock needs the operating system handle, not the C run-time
   // descriptor: passing the descriptor to LockFileEx fails with
   // ERROR_INVALID_HANDLE, and the lock file would silently never be taken.
+  const int descriptor = _fileno(handle_);
+  if (descriptor < 0) {
+    return -1;
+  }
   return static_cast<std::intptr_t>(_get_osfhandle(descriptor));
 #else
+  // On POSIX the file descriptor is itself the handle the advisory lock is
+  // taken on, so it is returned unchanged. Naming the accessor per platform is
+  // what keeps this function compilable on both.
+  const int descriptor = fileno(handle_);
+  if (descriptor < 0) {
+    return -1;
+  }
   return static_cast<std::intptr_t>(descriptor);
 #endif
 }

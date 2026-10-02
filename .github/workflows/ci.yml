@@ -110,3 +110,109 @@ jobs:
 
       - name: Install
         run: cmake --install build --prefix "${{ github.workspace }}/install-scp"
+
+  # The durable layer is where a portability mistake is most expensive, so the
+  # suites that exercise real files, real advisory locks and real operating
+  # system processes are run with their output printed rather than summarized.
+  linux-durability:
+    name: linux-durability-locking-and-processes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSCP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Journal format, recovery, writer locking and real process suites
+        working-directory: build
+        run: |
+          ctest -R test_journal --output-on-failure -V
+          ctest -R test_recovery --output-on-failure -V
+          ctest -R test_multiprocess --output-on-failure -V
+          ctest -R test_concurrency --output-on-failure -V
+
+  # Installing is not the same as being installable. This job builds the package,
+  # installs it, checks the layout that a consumer depends on, and then configures
+  # and runs an independent consumer that only ever sees the installed prefix.
+  linux-package-consumer:
+    name: linux-package-and-downstream-consumer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSCP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Install
+        run: cmake --install build --prefix "$RUNNER_TEMP/scp-prefix"
+
+      - name: Verify the installed package layout
+        run: |
+          set -eu
+          prefix="$RUNNER_TEMP/scp-prefix"
+          test -f "$prefix/include/scp/runtime.hpp"
+          test -f "$prefix/include/scp/journal.hpp"
+          test -f "$prefix/include/scp/composition.hpp"
+          test -n "$(find "$prefix" -name SiteControlPlaneConfig.cmake -print -quit)"
+          test -n "$(find "$prefix" -name SiteControlPlaneConfigVersion.cmake -print -quit)"
+          test -n "$(find "$prefix" -name SiteControlPlaneTargets.cmake -print -quit)"
+          test -n "$(find "$prefix" -name libsite_control_plane.a -print -quit)"
+          test -x "$prefix/bin/scpctl"
+          "$prefix/bin/scpctl" version
+
+      - name: Configure the consumer from outside the source tree
+        run: >
+          cmake -S tests/downstream -B consumer -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/scp-prefix"
+
+      - name: Build the consumer
+        run: cmake --build consumer
+
+      - name: Run the consumer against the installed package
+        run: ./consumer/downstream_consumer "$RUNNER_TEMP/consumer-site"
+
+  # The committed tree has to be sufficient on its own: a clean clone, with no
+  # build directory and nothing uncommitted, must configure, build, test and
+  # install without help from the working copy.
+  linux-fresh-clone:
+    name: linux-fresh-clone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone the committed tree into a clean directory
+        run: |
+          set -eu
+          git clone --quiet "$GITHUB_WORKSPACE" "$RUNNER_TEMP/fresh-scp"
+          cd "$RUNNER_TEMP/fresh-scp"
+          test "$(git status --porcelain | wc -l)" -eq 0
+          test -f CMakeLists.txt
+          test ! -d build
+
+      - name: Configure
+        run: >
+          cmake -S "$RUNNER_TEMP/fresh-scp" -B "$RUNNER_TEMP/fresh-build" -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DSCP_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build "$RUNNER_TEMP/fresh-build"
+
+      - name: Test
+        run: cd "$RUNNER_TEMP/fresh-build" && ctest --output-on-failure
+
+      - name: Install
+        run: cmake --install "$RUNNER_TEMP/fresh-build" --prefix "$RUNNER_TEMP/fresh-prefix"

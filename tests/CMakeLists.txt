@@ -12,7 +12,12 @@ target_include_directories(scp_test_support PUBLIC
   "${CMAKE_SOURCE_DIR}/src"
 )
 target_link_libraries(scp_test_support PUBLIC site_control_plane)
-target_link_libraries(scp_test_support PRIVATE "$<BUILD_INTERFACE:scp_warnings>")
+# PUBLIC, and build-interface only: the sanitizer flags and warning flags carried
+# by scp_warnings have to reach the test executables themselves, because an
+# instrumented object file must be linked by an instrumented link line. Keeping
+# it inside $<BUILD_INTERFACE:...> means none of it can reach the installed
+# package.
+target_link_libraries(scp_test_support PUBLIC "$<BUILD_INTERFACE:scp_warnings>")
 
 function(scp_add_test name)
   add_executable(${name} ${name}.cpp)
