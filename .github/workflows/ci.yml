@@ -108,7 +108,12 @@ jobs:
           echo Using %VSDIR%
           call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
           if errorlevel 1 exit /b 1
-          set | findstr /b /c:"PATH=" /c:"INCLUDE=" /c:"LIB=" /c:"LIBPATH=" >> "%GITHUB_ENV%"
+          if not defined VCToolsInstallDir exit /b 1
+          rem PATH goes through GITHUB_PATH, which prepends to it. Writing it to
+          rem GITHUB_ENV would replace the runner's PATH, and the match has to be
+          rem case-insensitive because vcvars stores the variable as "Path".
+          echo %VCToolsInstallDir%bin\Hostx64\x64>> "%GITHUB_PATH%"
+          set | findstr /b /i /c:"INCLUDE=" /c:"LIB=" /c:"LIBPATH=" >> "%GITHUB_ENV%"
 
       - name: Configure
         run: >

@@ -48,6 +48,17 @@ endif()
 # The downstream consumer is configured, built and run against a fresh install of
 # this build tree, from outside the source tree. It is the distributability
 # proof: an in-tree build is not evidence that the package works.
+#
+# A sanitizer build instruments the installed library, and an instrumented
+# static library has to be linked by an instrumented link line. The consumer is
+# an ordinary project that knows nothing about sanitizers, so the flags the
+# parent build used are handed to it explicitly rather than guessed at.
+if(SCP_SANITIZER_FLAGS)
+  string(REPLACE ";" " " SCP_CONSUMER_SANITIZER_FLAGS "${SCP_SANITIZER_FLAGS}")
+else()
+  set(SCP_CONSUMER_SANITIZER_FLAGS "")
+endif()
+
 add_test(NAME downstream_consumer
          COMMAND ${CMAKE_COMMAND}
                  -DSCP_SOURCE_DIR=${CMAKE_SOURCE_DIR}
@@ -57,6 +68,7 @@ add_test(NAME downstream_consumer
                  -DSCP_GENERATOR=${CMAKE_GENERATOR}
                  -DSCP_CXX_COMPILER=${CMAKE_CXX_COMPILER}
                  -DSCP_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+                 "-DSCP_CONSUMER_SANITIZER_FLAGS=${SCP_CONSUMER_SANITIZER_FLAGS}"
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/downstream/run_consumer.cmake)
 set_tests_properties(downstream_consumer PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

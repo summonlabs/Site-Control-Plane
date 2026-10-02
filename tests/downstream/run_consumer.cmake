@@ -56,6 +56,13 @@ endif()
 if(SCP_CXX_COMPILER)
   list(APPEND configure_command "-DCMAKE_CXX_COMPILER=${SCP_CXX_COMPILER}")
 endif()
+# When the parent build is instrumented, the consumer has to be compiled and
+# linked with the same instrumentation: the package it links is a static archive
+# whose objects reference the sanitizer runtime.
+if(DEFINED SCP_CONSUMER_SANITIZER_FLAGS AND NOT SCP_CONSUMER_SANITIZER_FLAGS STREQUAL "")
+  list(APPEND configure_command "-DCMAKE_CXX_FLAGS=${SCP_CONSUMER_SANITIZER_FLAGS}")
+  list(APPEND configure_command "-DCMAKE_EXE_LINKER_FLAGS=${SCP_CONSUMER_SANITIZER_FLAGS}")
+endif()
 
 execute_process(
   COMMAND ${configure_command}
