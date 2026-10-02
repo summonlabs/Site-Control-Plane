@@ -85,6 +85,11 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: ctest --output-on-failure
 
+  # This job must compile with MSVC. A Windows runner also has MinGW on PATH, and
+  # CMake will happily use it, which would make the job report a Windows result
+  # that says nothing about MSVC. The developer environment is entered
+  # explicitly, the compiler is named explicitly, and the identification CMake
+  # recorded is asserted before anything is built.
   windows-msvc:
     name: windows-msvc-${{ matrix.build_type }}
     runs-on: windows-latest
@@ -95,11 +100,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enter the MSVC developer environment
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDIR=%%i"
+          if not defined VSDIR exit /b 1
+          echo Using %VSDIR%
+          call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul
+          if errorlevel 1 exit /b 1
+          set | findstr /b /c:"PATH=" /c:"INCLUDE=" /c:"LIB=" /c:"LIBPATH=" >> "%GITHUB_ENV%"
+
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
           -DSCP_WARNINGS_AS_ERRORS=ON
+
+      - name: Assert the toolchain is MSVC and not a fallback
+        shell: bash
+        run: |
+          set -eu
+          grep -Rh '^set(CMAKE_CXX_COMPILER_ID' build/CMakeFiles/ | head -n 1
+          id=$(grep -Rh '^set(CMAKE_CXX_COMPILER_ID' build/CMakeFiles/ | head -n 1)
+          case "$id" in
+            *MSVC*) echo "compiling with MSVC" ;;
+            *) echo "the Windows job must compile with MSVC, but found: $id"; exit 1 ;;
+          esac
 
       - name: Build
         run: cmake --build build

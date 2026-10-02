@@ -563,6 +563,7 @@ SCP_TEST(identity_covers_every_field_but_origin) {
   check_identity_differs(id, base, kind, static_cast<std::uint16_t>(scp::kEvidenceSchemaVersion + 1U),
                          body, "schema version");
 
+  SCP_REQUIRE(!body.empty());
   std::vector<std::uint8_t> changed = body;
   changed[0] = static_cast<std::uint8_t>(changed[0] ^ 0x01U);
   check_identity_differs(id, base, kind, scp::kEvidenceSchemaVersion, changed, "one body byte");
@@ -765,7 +766,9 @@ SCP_TEST(decode_body_rejects_malformed_input) {
   // An enum byte that is not an enumerator is InvalidEnum, not a silent
   // reinterpretation.
   std::vector<std::uint8_t> facility_bad_enum = facility_bytes.value();
-  facility_bad_enum[8] = std::uint8_t{0xFF};  // generation (u64), then worst_active_severity (u8)
+  // Byte 8 is the severity enumerator: generation is a u64 before it.
+  SCP_REQUIRE(facility_bad_enum.size() > std::size_t{8});
+  facility_bad_enum[8] = std::uint8_t{0xFF};
   expect_error_code(
       scp::decode_body(EvidenceKind::FacilityState, scp::kEvidenceSchemaVersion, facility_bad_enum),
       StatusCode::InvalidEnum, "an invalid severity enumerator");
@@ -773,6 +776,7 @@ SCP_TEST(decode_body_rejects_malformed_input) {
   const Result<std::vector<std::uint8_t>> lifecycle_bytes = scp::encode_body(sample_lifecycle());
   SCP_REQUIRE_OK(lifecycle_bytes);
   std::vector<std::uint8_t> lifecycle_bad_enum = lifecycle_bytes.value();
+  SCP_REQUIRE(!lifecycle_bad_enum.empty());
   lifecycle_bad_enum[0] = std::uint8_t{0x00};
   expect_error_code(scp::decode_body(EvidenceKind::Lifecycle, scp::kEvidenceSchemaVersion,
                                      lifecycle_bad_enum),

@@ -20,7 +20,6 @@
 namespace {
 
 constexpr const char* kJournalName = "journal.scp";
-constexpr const char* kSnapshotName = "snapshot.scp";
 
 scp::JournalOptions options_for(const std::filesystem::path& directory, bool exclusive = true) {
   scp::JournalOptions options;
