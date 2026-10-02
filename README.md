@@ -585,12 +585,36 @@ What the suite actually does, beyond the counts:
   plan exiting 3 and a granted one exiting 0; JSON output checked for control
   characters; a byte-flipped journal making `verify` exit 3.
 
-**Sanitizers.** Linux CI runs the full suite under ASan+UBSan. On this Windows
-host no sanitizer runtime is installed for any available toolchain (clang 19
-shipped without `libclang_rt.asan*`, GCC 14.2 MinGW without `libasan`, and MSVC
-without the ASan static runtime), so ASan/UBSan were **not** run here; the Linux
-CI job is where that evidence comes from. See
-[Platform support and limitations](#platform-support-and-limitations).
+**Sanitizers.** Linux CI runs the whole suite under AddressSanitizer and
+UndefinedBehaviorSanitizer with `detect_leaks=1`, `strict_string_checks=1`,
+`check_initialization_order=1` and `halt_on_error=1`, and all fourteen tests
+pass there, including the real-process, journal and concurrency suites. That is
+where the sanitizer evidence comes from: on this Windows host no sanitizer
+runtime is installed for any available toolchain (clang 19 shipped without
+`libclang_rt.asan*`, GCC 14.2 MinGW without `libasan`, and MSVC without the ASan
+static runtime), so ASan and UBSan were **not** run here and none is claimed for
+Windows. See [Platform support and limitations](#platform-support-and-limitations).
+
+**Continuous integration.** Every check passes on the released commit. The
+matrix is deliberately wider than "it builds on Linux", because each job covers
+something the others cannot:
+
+```
+windows-msvc-Debug, windows-msvc-Release .. MSVC 14.51, /W4 /WX, 14/14 each
+linux-gcc-Debug, linux-gcc-Release ........ GCC, -Wall ... -Werror, 14/14 each
+linux-clang-Debug, linux-clang-Release .... Clang, -Wall ... -Werror, 14/14 each
+linux-clang-asan-ubsan .................... 14/14 instrumented, leak detection on
+linux-durability-locking-and-processes .... journal 10 cases/85 checks,
+                                            recovery 12/125, multiprocess 4/30,
+                                            concurrency 8/101, all green
+linux-package-and-downstream-consumer ..... install, layout asserted, consumer
+                                            configured outside the tree and run
+linux-fresh-clone ......................... clean clone built, tested, installed
+```
+
+The Windows job asserts that CMake identified MSVC before it builds anything,
+because a Windows runner also has MinGW on PATH and would otherwise report a
+MinGW result under an MSVC name.
 
 ---
 
@@ -641,8 +665,8 @@ as `docs/CONCURRENCY.md` states.
 
 | | |
 | --- | --- |
-| **Supported** | Windows (MSVC 2022, MinGW-w64 GCC 14) and Linux (GCC, Clang), 64-bit, C++20 |
-| **CI** | Windows/MSVC Debug+Release, Ubuntu/GCC Debug+Release, Ubuntu/Clang Debug+Release, Ubuntu/Clang ASan+UBSan |
+| **Supported** | Windows (MSVC 2022, MinGW-w64 GCC) and Linux (GCC, Clang), 64-bit, C++20 |
+| **CI** | ten checks per commit: Windows/MSVC Debug+Release, Ubuntu/GCC Debug+Release, Ubuntu/Clang Debug+Release, ASan+UBSan with leak detection, durability/locking/real-process suites, package plus independent downstream consumer, fresh clone |
 | **No third-party runtime dependency** | the standard library plus first-party components |
 
 Honest limitations, stated rather than implied:
@@ -652,8 +676,10 @@ Honest limitations, stated rather than implied:
   a substitute for authenticated encryption, and nothing here authenticates a
   remote peer. Evidence arrives over whatever transport the operator provides.
 - **No sanitizer evidence from Windows.** ASan and UBSan are exercised in Linux
-  CI. On this Windows host no sanitizer runtime was installed for any available
-  toolchain, so neither was run here and none is claimed.
+  CI, where all fourteen tests pass with leak detection and halt-on-error. On
+  this Windows host no sanitizer runtime was installed for any available
+  toolchain, so neither was run here and none is claimed for Windows. The
+  default `/W4 /WX` MSVC build is what covers Windows here.
 - **One writer per site directory.** Exclusion is total. Concurrency is not a goal
   of this boundary, and throughput on many cores is bounded by one mutex.
 - **In-memory runtimes are not durable**, and they say so: the commit outcome
