@@ -1,0 +1,33 @@
+# Build trees
+/build/
+/build-*/
+/out/
+/install/
+/prefix/
+cmake-build-*/
+*.user
+
+# Test / benchmark / validation residue
+/scratch/
+/bench-results/
+*.tmp
+*.log
+*.dmp
+*.pdb
+*.ilk
+*.obj
+*.o
+*.exe
+*.lib
+*.dll
+*.a
+*.so
+*.dylib
+!CMakeLists.txt
+
+# Editors and tooling
+.vs/
+.vscode/
+.idea/
+*.swp
+*~

@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+# The Site Control Plane library has exactly one transitive package dependency:
+# the platform threads library, which the standard library's synchronisation
+# primitives need on some platforms. Re-finding it here is what lets a consumer
+# link the exported target without replicating the requirement by hand.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/SiteControlPlaneTargets.cmake")
+
+check_required_components(SiteControlPlane)

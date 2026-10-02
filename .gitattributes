@@ -1,0 +1,10 @@
+# Normalize line endings so a checkout is byte-identical on every platform.
+# The repository stores LF; a Windows working tree may present CRLF, but what is
+# committed, hashed and built on CI is always LF.
+* text=auto eol=lf
+
+# No file in this repository is binary, but these would be if one ever were.
+*.png binary
+*.jpg binary
+*.zip binary
+*.gz binary
