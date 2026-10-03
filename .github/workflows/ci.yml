@@ -1,9 +1,5 @@
 name: ci
 
-# Tests are run plainly and are never given a timeout. No job here sets
-# timeout-minutes, no test is wrapped in a shell timeout, and nothing kills a
-# process and calls the result a pass. A hanging test is a defect to diagnose.
-
 on:
   push:
     branches: [ main ]
