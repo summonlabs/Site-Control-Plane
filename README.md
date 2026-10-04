@@ -721,11 +721,6 @@ cmake/            the package config template
 
 ## Relationship to adjacent boundaries
 
-This repository is one boundary in the **Data Center Control Plane (DCCP)**, the
-third arc of Summon Software Labs' Open Source Data Center Model, sitting above
-the **Accelerated Systems Infrastructure (ASI)** and the **Distributed Fabric
-Infrastructure (DFI)**, alongside the earlier DCCP facility boundaries.
-
 The architectural invariant is: **own one thing exactly, consume neighbouring
 truth explicitly, never infer another runtime's authority, and never absorb
 another boundary merely because integration exists.**
