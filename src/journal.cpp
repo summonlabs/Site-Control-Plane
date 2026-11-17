@@ -63,6 +63,8 @@ struct ScanResult {
   Header header;
   std::vector<Frame> frames;
   std::vector<JournalOperation> committed;
+  /// Journal position of each entry of \c committed.
+  std::vector<std::uint64_t> committed_positions;
   std::uint64_t committed_end = kHeaderBytes;
   JournalSequence first_committed_sequence{};
   JournalSequence last_sequence{};
@@ -378,6 +380,7 @@ Status build_scan(const std::vector<std::uint8_t>& bytes, ScanResult& scan, Stat
       }
       for (const JournalOperation& operation : transaction.value().operations) {
         scan.committed.push_back(operation);
+        scan.committed_positions.push_back(frame.sequence.value());
       }
       scan.committed_transactions += 1;
       scan.last_sequence = frame.sequence;
@@ -713,6 +716,22 @@ Result<JournalRecoveryReport> Journal::recover() {
     report.loaded_snapshot = true;
     report.snapshot_sequence = snapshot.value().sequence;
     report.site_generation = snapshot.value().site_generation;
+
+    // A compaction writes its snapshot before it retires the journal prefix the
+    // snapshot covers. When it stops in between -- a crash, or a rewrite that
+    // failed -- that prefix is still in the journal. Its operations are already
+    // folded into the snapshot, so they are not handed back for replay: applied
+    // over the snapshot they took effect a second time.
+    const std::uint64_t covered = snapshot.value().sequence.value();
+    std::vector<JournalOperation> beyond;
+    beyond.reserve(report.operations.size());
+    for (std::size_t index = 0; index < report.operations.size(); ++index) {
+      if (scan.committed_positions[index] > covered) {
+        beyond.push_back(std::move(report.operations[index]));
+      }
+    }
+    report.operations = std::move(beyond);
+    report.replayed_operations = report.operations.size();
   }
   return report;
 }
@@ -773,13 +792,23 @@ Result<JournalCommit> Journal::commit(const JournalTransaction& transaction) {
                     "; compact the journal deliberately");
   }
 
+  // Every failure from here on puts the file back on its committed boundary.
+  // Paths that returned without doing so left a partial or uncommitted frame
+  // where the next commit expected to write, so that commit failed as well.
+  const auto retire_partial = [this]() {
+    const Status ignored = impl_->file.truncate_to(impl_->committed_end);
+    (void)ignored;
+  };
+
   // Phase 1: write the prepare frame and make it durable.
   Status status = impl_->file.write_all(prepare_bytes);
   if (!status.ok()) {
+    retire_partial();
     return status;
   }
   status = impl_->file.flush_and_sync();
   if (!status.ok()) {
+    retire_partial();
     return status;
   }
 
@@ -788,6 +817,7 @@ Result<JournalCommit> Journal::commit(const JournalTransaction& transaction) {
     std::vector<std::uint8_t> readback(prepare_bytes.size());
     const Result<std::size_t> got = impl_->file.read_at(prepare_offset, readback);
     if (!got.has_value()) {
+      retire_partial();
       return got.status();
     }
     if (got.value() != readback.size() ||
@@ -828,6 +858,9 @@ Result<JournalCommit> Journal::commit(const JournalTransaction& transaction) {
     std::vector<std::uint8_t> readback(commit_bytes.size());
     const Result<std::size_t> got = impl_->file.read_at(commit_offset, readback);
     if (!got.has_value()) {
+      // Left in place, this transaction was complete on disk and would have been
+      // replayed by recovery although the caller is told it failed.
+      retire_partial();
       return got.status();
     }
     if (got.value() != readback.size() ||
@@ -959,6 +992,18 @@ Result<CompactionReport> Journal::compact(const JournalSnapshot& snapshot) {
   put_bytes(snapshot_bytes, payload);
   if (snapshot_bytes.size() > kMaxSnapshotBytes) {
     return fail(StatusCode::LimitExceeded, "snapshot exceeds the maximum snapshot size");
+  }
+  {
+    // The snapshot replaces the journal prefix it covers, and recovery refuses
+    // to carry on without a snapshot it cannot read. One the reader would refuse
+    // is therefore never written.
+    CanonicalReader check(payload);
+    const Result<JournalSnapshot> readable = canonical_read_snapshot(check);
+    if (!readable.has_value()) {
+      return fail(StatusCode::LimitExceeded,
+                  "refusing to compact: recovery would not accept this snapshot (" +
+                      readable.status().message() + ")");
+    }
   }
   const std::filesystem::path snapshot_temp = impl_->options.directory / kSnapshotTempName;
   SCP_TRY(detail::write_file_atomic(snapshot_temp, snapshot_path, snapshot_bytes));

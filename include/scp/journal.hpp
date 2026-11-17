@@ -82,6 +82,11 @@ struct JournalOperation {
 
 inline constexpr std::size_t kMaxOperationsPerTransaction = 4096;
 
+/// Most delegation grants a site records. A snapshot carries every recorded
+/// grant and its reader refuses more than this, so the bound is enforced where
+/// a grant is recorded.
+inline constexpr std::size_t kMaxRecordedGrants = 4096;
+
 /// A group of operations that commit together or not at all.
 struct JournalTransaction {
   TransactionId id{};

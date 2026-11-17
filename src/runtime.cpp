@@ -200,6 +200,15 @@ Result<std::unique_ptr<SiteControlPlane>> SiteControlPlane::open(const RuntimeOp
   if (options.evidence_capacity == 0) {
     return fail(StatusCode::InvalidArgument, "evidence capacity must be at least one");
   }
+  if (options.evidence_capacity > kMaxAcceptedEvidenceRecords) {
+    // A snapshot carries every accepted record and its reader refuses more than
+    // this. A larger capacity let a compaction write a snapshot that recovery
+    // then refused, and a store whose snapshot is refused does not open.
+    return fail(StatusCode::InvalidArgument,
+                "evidence capacity must not exceed " +
+                    std::to_string(kMaxAcceptedEvidenceRecords) +
+                    ", the most accepted records a snapshot can carry");
+  }
   if (options.max_operations_per_transaction == 0) {
     return fail(StatusCode::InvalidArgument, "transaction operation bound must be at least one");
   }
@@ -547,6 +556,14 @@ Status SiteControlPlane::record_grant(const DelegationGrant& grant, Timestamp no
   if (duplicate) {
     return fail(StatusCode::AlreadyExists,
                 "grant " + grant.id.to_hex() + " is already recorded");
+  }
+  if (impl_->grants.size() >= kMaxRecordedGrants) {
+    // Recording was unbounded while a snapshot carries at most this many
+    // grants: one more, and the next compaction wrote a snapshot that recovery
+    // refused.
+    return fail(StatusCode::LimitExceeded,
+                "the runtime already records " + std::to_string(impl_->grants.size()) +
+                    " grants, the most a snapshot can carry");
   }
   JournalOperation operation;
   operation.kind = OperationKind::RecordGrant;

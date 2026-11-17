@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -410,6 +411,119 @@ SCP_TEST(runtime_records_grants_and_policy_durably) {
   SCP_CHECK(reopened->status().policy_digest == scp::compute_policy_digest(
                                                     scp_test::policy_with_generation(7)));
   SCP_REQUIRE(reopened->close().ok());
+}
+
+namespace {
+
+/// The reader of a snapshot accepts this many grants and no more.
+constexpr std::size_t kSnapshotGrantBound = 4096;
+
+scp::DelegationGrant grant_number(std::uint64_t index) {
+  scp::DelegationGrant grant;
+  grant.id = scp::GrantId(0x6200000000000000ULL + index, index + 1);
+  grant.site = scp_test::default_site();
+  grant.grantor = scp::Name::parse("facility-policy-engine").value();
+  grant.subject = scp::Name::parse("site-control-plane").value();
+  grant.scopes = scp::ScopeSet::of(scp::ActionScope::AcceptObligation);
+  grant.issued_at = scp_test::base_instant();
+  return grant;
+}
+
+}  // namespace
+
+SCP_TEST(a_compaction_that_stops_after_its_snapshot_does_not_replay_the_covered_journal) {
+  scp_test::TempDirectory temp("recovery-compaction-interrupted");
+  scp::RuntimeOptions options = scp_test::durable_runtime_options(temp.path());
+  options.compaction_threshold_bytes = 1;
+  {
+    SCP_OPEN_RUNTIME(runtime, options);
+    SCP_REQUIRE(runtime->record_grant(grant_number(1), scp_test::base_instant()).ok());
+    SCP_REQUIRE(runtime->ingest(records_for(1)).ok());
+
+    // A compaction writes its snapshot first and retires the journal prefix the
+    // snapshot covers second. Here the second step cannot happen: something that
+    // is not a file is where the rewritten journal is staged. The commit is
+    // valid, the snapshot is in place, and the journal still holds everything.
+    const std::filesystem::path obstacle = temp.path() / "journal.scp.tmp";
+    std::filesystem::create_directory(obstacle);
+    {
+      std::ofstream occupied(obstacle / "occupied", std::ios::binary);
+      occupied << "occupied";
+    }
+    scp::CommitOptions commit;
+    commit.now = scp_test::base_instant();
+    const auto outcome = runtime->commit(commit);
+    SCP_REQUIRE_OK(outcome);
+    SCP_CHECK(outcome.value().committed);
+    SCP_CHECK(!outcome.value().compacted);
+    SCP_CHECK(std::filesystem::exists(temp.path() / kSnapshotName));
+    SCP_REQUIRE(runtime->close().ok());
+    std::error_code ignored;
+    std::filesystem::remove_all(obstacle, ignored);
+  }
+
+  // Everything the journal holds is already folded into the snapshot. Recovery
+  // starts from the snapshot and replays only what lies beyond it.
+  SCP_OPEN_RUNTIME(reopened, options);
+  SCP_CHECK_EQ(reopened->grants().size(), std::size_t{1});
+  SCP_CHECK_EQ(reopened->status().accepted_evidence, records_for(1).size());
+  SCP_CHECK_EQ(reopened->status().site_generation.value(), std::uint64_t{1});
+  SCP_REQUIRE(reopened->close().ok());
+}
+
+SCP_TEST(compaction_never_writes_a_snapshot_recovery_would_refuse) {
+  scp_test::TempDirectory temp("recovery-snapshot-bound");
+  scp::JournalOptions journal_options;
+  journal_options.directory = temp.path();
+  journal_options.site = scp_test::default_site();
+  {
+    auto opened = scp::Journal::open(journal_options);
+    SCP_REQUIRE_OK(opened);
+    scp::Journal journal = std::move(opened.value());
+    SCP_REQUIRE_OK(journal.commit(generation_transaction(1)));
+
+    // One grant more than a snapshot may carry. A store whose snapshot is
+    // refused does not recover, so such a snapshot must not replace anything.
+    scp::JournalSnapshot snapshot;
+    snapshot.site = scp_test::default_site();
+    snapshot.site_generation = scp::SiteGeneration(1);
+    snapshot.sequence = journal.sequence();
+    snapshot.created_at = scp_test::base_instant();
+    snapshot.chain_digest = journal.chain_digest();
+    for (std::uint64_t index = 0; index <= kSnapshotGrantBound; ++index) {
+      snapshot.grants.push_back(grant_number(index));
+    }
+    const auto compacted = journal.compact(snapshot);
+    SCP_CHECK(!compacted.has_value());
+    SCP_CHECK(!std::filesystem::exists(temp.path() / kSnapshotName));
+    SCP_CHECK_EQ(journal.sequence().value(), std::uint64_t{1});
+    SCP_REQUIRE_STATUS_OK(journal.close());
+  }
+  auto reopened = scp::Journal::open(journal_options);
+  SCP_REQUIRE_OK(reopened);
+  scp::Journal journal = std::move(reopened.value());
+  SCP_CHECK_EQ(journal.sequence().value(), std::uint64_t{1});
+  SCP_REQUIRE_STATUS_OK(journal.close());
+}
+
+SCP_TEST(what_a_runtime_holds_always_fits_the_snapshot_that_compaction_writes) {
+  // Grants: the runtime records as many as a snapshot carries, and refuses the
+  // next one instead of holding state that could never be compacted.
+  {
+    SCP_OPEN_RUNTIME(runtime, scp_test::memory_runtime_options());
+    for (std::uint64_t index = 0; index < kSnapshotGrantBound; ++index) {
+      SCP_REQUIRE(runtime->record_grant(grant_number(index), scp_test::base_instant()).ok());
+    }
+    SCP_REQUIRE_STATUS_ERROR(
+        runtime->record_grant(grant_number(kSnapshotGrantBound), scp_test::base_instant()),
+        scp::StatusCode::LimitExceeded);
+    SCP_CHECK_EQ(runtime->grants().size(), kSnapshotGrantBound);
+    SCP_REQUIRE(runtime->close().ok());
+  }
+  // Evidence: a capacity above what a snapshot carries is refused at open.
+  scp::RuntimeOptions options = scp_test::memory_runtime_options();
+  options.evidence_capacity = scp::kMaxAcceptedEvidenceRecords + 1;
+  SCP_REQUIRE_ERROR(scp::SiteControlPlane::open(options), scp::StatusCode::InvalidArgument);
 }
 
 SCP_TEST_MAIN("test_recovery")

@@ -60,7 +60,7 @@ inline constexpr std::uint32_t kMaxPlanConditionCount = 256;
 inline constexpr std::uint32_t kMaxPlanStepCount = 256;
 inline constexpr std::uint32_t kMaxSupersededIds = 128;
 inline constexpr std::uint32_t kMaxConflictingIds = 128;
-inline constexpr std::uint32_t kMaxGrantCount = 4096;
+inline constexpr std::uint32_t kMaxGrantCount = static_cast<std::uint32_t>(kMaxRecordedGrants);
 
 // ---------------------------------------------------------------------------
 // Scalars
