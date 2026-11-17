@@ -563,8 +563,8 @@ SCP_TEST(identity_covers_every_field_but_origin) {
   check_identity_differs(id, base, kind, static_cast<std::uint16_t>(scp::kEvidenceSchemaVersion + 1U),
                          body, "schema version");
 
-  SCP_REQUIRE(!body.empty());
   std::vector<std::uint8_t> changed = body;
+  SCP_REQUIRE(!changed.empty());
   changed[0] = static_cast<std::uint8_t>(changed[0] ^ 0x01U);
   check_identity_differs(id, base, kind, scp::kEvidenceSchemaVersion, changed, "one body byte");
 
